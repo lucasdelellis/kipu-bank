@@ -15,10 +15,10 @@ contract KipuBank {
             State variables
     ///////////////////////////////////*/
     mapping(address user => uint256 balance) private s_balances;
-    uint256 internal s_depositAmount;
-    uint256 internal s_withdrawalAmount;
-    uint256 immutable public i_maxAmountPerWithdrawal;
-    uint256 immutable public i_maxContractBalance;
+    uint256 public s_depositCount;
+    uint256 public s_withdrawalCount;
+    uint256 immutable public i_maxWithdrawal;
+    uint256 immutable public i_bankCap;
 
     /*///////////////////////////////////
                 Events
@@ -29,14 +29,25 @@ contract KipuBank {
     /*///////////////////////////////////
                 Errors
     ///////////////////////////////////*/
-    error KipuBank_MaxContractBalanceReached(uint256 maxContractBalance, uint256 currentBalance);
+    error KipuBank_BankCapReached(uint256 maxContractBalance, uint256 currentBalance);
     error KipuBank_NotEnoughBalance(uint256 balance, uint256 amount);
     error KipuBank_TooMuchWithdrawal(uint256 maxAmountPerWithdrawal, uint256 amount);
-    error KipuBank_WithdrawalFailed(bytes error);
+    error KipuBank_TransferFailed(bytes error);
+    error KipuBank_FallbackNotAllowed();
 
     /*///////////////////////////////////
                 Modifiers
     ///////////////////////////////////*/
+    modifier hasEnoughBalance(uint256 _amount) {
+        if (_amount > i_maxWithdrawal) {
+            revert KipuBank_TooMuchWithdrawal(i_maxWithdrawal, _amount);
+        }
+
+        if (s_balances[msg.sender] < _amount) {
+            revert KipuBank_NotEnoughBalance(s_balances[msg.sender], _amount);
+        }
+        _;
+    }
 
     /*///////////////////////////////////
                 Functions
@@ -45,47 +56,44 @@ contract KipuBank {
     /*/////////////////////////
             constructor
     /////////////////////////*/
-    constructor(uint256 _maxContractBalance, uint256 _maxAmountPerWithdrawal) {
-        i_maxAmountPerWithdrawal = _maxAmountPerWithdrawal;
-        i_maxContractBalance = _maxContractBalance;
+    constructor(uint256 _bankCap, uint256 _maxWithdrawal) {
+        i_maxWithdrawal = _maxWithdrawal;
+        i_bankCap = _bankCap;
     }
 
     /*/////////////////////////
         Receive&Fallback
     /////////////////////////*/
+    receive() external payable {
+        this.deposit();
+    }
+
+    fallback() external payable { 
+        revert KipuBank_FallbackNotAllowed();
+    }
 
     /*/////////////////////////
             external
     /////////////////////////*/
     function deposit() external payable {
-        if (address(this).balance >= i_maxContractBalance) {
-            revert KipuBank_MaxContractBalanceReached(i_maxContractBalance, address(this).balance);
+        if (_exceedsBankCap(msg.value)) {
+            revert KipuBank_BankCapReached(i_bankCap, address(this).balance + msg.value);
         }
 
-        s_depositAmount += 1;
+        s_depositCount += 1;
         s_balances[msg.sender] += msg.value;
         emit KipuBank_DepositReceived(msg.sender, msg.value);
     }
 
-    function withdrawal(uint256 _amount) external {
-        if (_amount > i_maxAmountPerWithdrawal) {
-            revert KipuBank_TooMuchWithdrawal(i_maxAmountPerWithdrawal, _amount);
-        }
+    function withdraw(uint256 _amount) external hasEnoughBalance(_amount) {
+        // No se verifica que el contrato tenga suficiente balance porque no es un escenario valido. 
 
-        if (s_balances[msg.sender] < _amount) {
-            revert KipuBank_NotEnoughBalance(s_balances[msg.sender], _amount);
-        }
-
-        s_depositAmount += 1;
+        s_withdrawalCount += 1;
         s_balances[msg.sender] -= _amount;
 
-        (bool success, bytes memory error) = msg.sender.call{value: _amount}("");
+        _transferEth(msg.sender, _amount);
 
-        if (!success) {
-            revert KipuBank_WithdrawalFailed(error);
-        }
-
-        emit KipuBank_DepositReceived(msg.sender, _amount);
+        emit KipuBank_WithdrawalMade(msg.sender, _amount);
     }
 
     /*/////////////////////////
@@ -99,11 +107,24 @@ contract KipuBank {
     /*/////////////////////////
             private
     /////////////////////////*/
+    function _exceedsBankCap(uint256 _amount) private view returns (bool) {
+        return (address(this).balance + _amount) >= i_bankCap;
+    }
+
+    function _transferEth(address _recipient, uint256 _amount) private {
+        (bool success, bytes memory error) = _recipient.call{value: _amount}("");
+
+        if (!success) revert KipuBank_TransferFailed(error);
+    }
+
+    function _deposit(address _from, uint256 _amount) private {
+        
+    }
 
     /*/////////////////////////
         View & Pure
     /////////////////////////*/
-    function getBalance() external view returns (uint256 balance_) {
-        balance_ = s_balances[msg.sender];
+    function getBalance() external view returns (uint256) {
+        return s_balances[msg.sender];
     }
 }

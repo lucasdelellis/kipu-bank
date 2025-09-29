@@ -85,7 +85,7 @@ contract KipuBank {
         s_withdrawalCount += 1;
         s_balances[msg.sender] -= _amount;
 
-        _transferEth(msg.sender, _amount);
+        _transferEth(payable(msg.sender), _amount);
 
         emit KipuBank_WithdrawalMade(msg.sender, _amount);
     }
@@ -105,7 +105,7 @@ contract KipuBank {
         return (address(this).balance + _amount) > i_bankCap;
     }
 
-    function _transferEth(address _recipient, uint256 _amount) private {
+    function _transferEth(address payable _recipient, uint256 _amount) private {
         (bool success, bytes memory error) = _recipient.call{value: _amount}("");
 
         if (!success) revert KipuBank_TransferFailed(error);

@@ -65,7 +65,7 @@ contract KipuBank {
         Receive&Fallback
     /////////////////////////*/
     receive() external payable {
-        this.deposit();
+        _deposit(msg.sender, msg.value);    
     }
 
     fallback() external payable { 
@@ -76,13 +76,7 @@ contract KipuBank {
             external
     /////////////////////////*/
     function deposit() external payable {
-        if (_exceedsBankCap(msg.value)) {
-            revert KipuBank_BankCapReached(i_bankCap, address(this).balance + msg.value);
-        }
-
-        s_depositCount += 1;
-        s_balances[msg.sender] += msg.value;
-        emit KipuBank_DepositReceived(msg.sender, msg.value);
+        _deposit(msg.sender, msg.value);
     }
 
     function withdraw(uint256 _amount) external hasEnoughBalance(_amount) {
@@ -108,7 +102,7 @@ contract KipuBank {
             private
     /////////////////////////*/
     function _exceedsBankCap(uint256 _amount) private view returns (bool) {
-        return (address(this).balance + _amount) >= i_bankCap;
+        return (address(this).balance + _amount) > i_bankCap;
     }
 
     function _transferEth(address _recipient, uint256 _amount) private {
@@ -118,7 +112,13 @@ contract KipuBank {
     }
 
     function _deposit(address _from, uint256 _amount) private {
-        
+        if (_exceedsBankCap(_amount)) {
+            revert KipuBank_BankCapReached(i_bankCap, address(this).balance + _amount);
+        }
+
+        s_depositCount += 1;
+        s_balances[_from] += _amount;
+        emit KipuBank_DepositReceived(_from, _amount);
     }
 
     /*/////////////////////////

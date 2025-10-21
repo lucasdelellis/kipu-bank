@@ -14,21 +14,22 @@ El objetivo del contrato es simular una infraestructura bancaria que permita man
 Esta versión de `KipuBank` introduce una serie de **mejoras estructurales y de seguridad** respecto a la versión original:
 
 ### 🔹 Soporte Multi-token (ETH y USDC)
-- Se agregó soporte para múltiples tokens utilizando el mapping doble:
+  Se agregó soporte para múltiples tokens utilizando el mapping doble:
+
   ```solidity
   mapping(address user => mapping(address token => uint256 balance))
+  ```
 
-    Permite manejar balances separados por token sin necesidad de contratos duplicados.
+  Permite manejar balances separados por token sin necesidad de contratos duplicados.
 
-🔹 Integración con Chainlink Price Feeds
+### 🔹 Integración con Chainlink Price Feeds
 
     Se incorporaron los feeds de ETH/USD y USDC/USD:
 
     AggregatorV3Interface public s_feedETHToUSD;
     AggregatorV3Interface public s_feedUSDCToUSD;
-
+    
     El contrato convierte automáticamente cualquier depósito o retiro a su equivalente en USD.
-
     Esto permite aplicar límites y caps unificados en USD, sin depender de la volatilidad de los activos.
 
 🔹 Seguridad y Confiabilidad
@@ -67,21 +68,21 @@ Esta versión de `KipuBank` introduce una serie de **mejoras estructurales y de 
 
 ⚙️ Variables de despliegue
 
-_bankCap        // Cap total del contrato en USD (ej: 100_000 * 1e8)
-_maxWithdrawal  // Monto máximo de retiro en USD por transacción (ej: 1_000 * 1e8)
-_owner          // Dirección del propietario del contrato
-_feedETHToUSD   // Dirección del feed de Chainlink ETH/USD
-_usdc           // Dirección del token USDC (ERC20)
-_feedUSDCToUSD  // Dirección del feed de Chainlink USDC/USD
+- _bankCap        // Cap total del contrato en USD (ej: 100_000 * 1e8)
+- _maxWithdrawal  // Monto máximo de retiro en USD por transacción (ej: 1_000 * 1e8)
+- _owner          // Dirección del propietario del contrato
+- _feedETHToUSD   // Dirección del feed de Chainlink ETH/USD
+- _usdc           // Dirección del token USDC (ERC20)
+- _feedUSDCToUSD  // Dirección del feed de Chainlink USDC/USD
 
-🧩 Interacción con el Contrato
-## Depositar ETH
+## 🧩 Interacción con el Contrato
+### Depositar ETH
 
 function depositETH() external payable
 
 O directamente enviando ETH al contrato (activará receive()).
 
-## Depositar USDC
+### Depositar USDC
 
 function depositUSDC(uint256 amount) external
 
@@ -90,7 +91,7 @@ Antes de llamar, el usuario debe aprobar al contrato para mover sus USDC:
 usdc.approve(address(kipuBank), amount);
 kipuBank.depositUSDC(amount);
 
-## Retirar ETH o USDC
+### Retirar ETH o USDC
 
 function withdrawETH(uint256 amount) external
 function withdrawUSDC(uint256 amount) external
@@ -101,31 +102,31 @@ El retiro se valida en USD y debe cumplir:
 
     No superar el balance del usuario
 
-## Consultar balance
+### Consultar balance
 
 function getBalance() external view returns (uint256)
 
 Retorna el balance del usuario en USD, combinando ETH y USDC.
 
-## Cambiar feeds de Chainlink (solo Owner)
+### Cambiar feeds de Chainlink (solo Owner)
 
 function setETHToUSDFeed(address newFeed) external onlyOwner
 function setUSDCToUSDFeed(address newFeed) external onlyOwner
 
-🧠 Decisiones de Diseño y Trade-offs
-✅ Diseño basado en USD
+## 🧠 Decisiones de Diseño y Trade-offs
+### ✅ Diseño basado en USD
 
     Se decidió unificar todos los límites y balances internos en USD para simplificar la gestión multi-token.
 
     Esto implica dependencia en oráculos Chainlink, pero permite una capa de abstracción estable frente a volatilidad.
 
-⚖️ Trade-off: precisión vs. simplicidad
+### ⚖️ Trade-off: precisión vs. simplicidad
 
     Los precios de Chainlink y los decimales de los tokens se normalizan a 18 y 6 respectivamente.
 
     Aunque puede generar pequeñas diferencias por rounding, simplifica los cálculos y evita overflow.
 
-🔒 Seguridad por diseño
+### 🔒 Seguridad por diseño
 
     ReentrancyGuard evita ataques por múltiples llamadas en la misma transacción.
 
@@ -133,13 +134,13 @@ function setUSDCToUSDFeed(address newFeed) external onlyOwner
 
     Las funciones privadas siguen el patrón Checks → Effects → Interactions.
 
-🧩 Escalabilidad
+### 🧩 Escalabilidad
 
     El uso de mapping(address => mapping(address => uint256)) permite extender fácilmente el soporte a más tokens ERC20 en el futuro.
 
-📜 Licencia
+## 📜 Licencia
 
 Este proyecto está licenciado bajo MIT License.
 
-🔗 Contrato en Etherscan
+## 🔗 Contrato en Etherscan
 > [Etherscan link](https://sepolia.etherscan.io/address/0x76706b50a8e62917c8ae34fe0318f8ed0460d608)

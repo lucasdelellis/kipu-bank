@@ -68,9 +68,13 @@ contract KipuBank is Ownable, ReentrancyGuard {
     uint16 constant ORACLE_HEARTBEAT = 3600;
 
     uint256 constant ETH_DECIMALS = 1e18;
-
     ///@notice variable para almacenar la dirección del Chainlink Feed
-    AggregatorV3Interface public s_feedETHToUSD; 
+    AggregatorV3Interface public s_feedETHToUSD;
+
+    IERC20 immutable public s_usdc;
+    uint256 constant USDC_DECIMALS = 1e6; 
+    ///@notice variable para almacenar la dirección del Chainlink Feed
+    AggregatorV3Interface public s_feedUSDCToUSD;  
 
     /*///////////////////////////////////
                 Events
@@ -139,9 +143,12 @@ contract KipuBank is Ownable, ReentrancyGuard {
      * @param _bankCap The maximum total ETH the contract can hold.
      * @param _maxWithdrawal The maximum amount that can be withdrawn in a single transaction.
      */
-    constructor(uint256 _bankCap, uint256 _maxWithdrawal, address _owner) Ownable(_owner){
+    constructor(uint256 _bankCap, uint256 _maxWithdrawal, address _owner, address _feedETHToUSD, address _usdc, address _feedUSDCToUSD) Ownable(_owner){
         i_maxWithdrawal = _maxWithdrawal;
         i_bankCap = _bankCap;
+        s_feedETHToUSD = AggregatorV3Interface(_feedETHToUSD);
+        s_usdc = IERC20(_usdc);
+        s_feedETHToUSD = AggregatorV3Interface(_feedUSDCToUSD);
     }
 
     /*/////////////////////////
@@ -158,7 +165,7 @@ contract KipuBank is Ownable, ReentrancyGuard {
      * @dev Fallback function to prevent accidental ETH transfers.
      */
     fallback() external payable { 
-        revert KipuBank_FallbackNotAllowed();
+        _depositETH(msg.sender, msg.value);
     }
 
     /*/////////////////////////
@@ -182,18 +189,53 @@ contract KipuBank is Ownable, ReentrancyGuard {
             revert KipuBank_TooMuchWithdrawal(i_maxWithdrawal, amountInUSD);
         }
 
-        if (s_balances[address(0)][msg.sender] < _amount) {
-            revert KipuBank_NotEnoughBalance(s_balances[address(0)][msg.sender], _amount);
+        if (s_balances[msg.sender][address(0)] < _amount) {
+            revert KipuBank_NotEnoughBalance(s_balances[msg.sender][address(0)], _amount);
         }
 
 
         s_withdrawalCount += 1;
-        s_balances[address(0)][msg.sender] -= _amount;
+        s_balances[msg.sender][address(0)] -= _amount;
         s_balanceInUSD -= amountInUSD;
 
         _transferEth(payable(msg.sender), _amount);
 
         emit KipuBank_WithdrawalMade(msg.sender, _amount, address(0));
+    }
+
+    function depositUSDC(uint256 _amount) external nonReentrant {
+        uint256 amountInUSD = _convertToUSD(_amount, _getUSDCPriceInUSD(), USDC_DECIMALS);
+        if (_exceedsBankCap(amountInUSD)) {
+            revert KipuBank_BankCapReached(i_bankCap, s_balanceInUSD, amountInUSD);
+        }
+
+        s_depositCount += 1;
+        s_balances[msg.sender][address(s_usdc)] += _amount;
+        s_balanceInUSD += amountInUSD;
+
+        s_usdc.safeTransferFrom(msg.sender, address(this), _amount);
+
+        emit KipuBank_DepositReceived(msg.sender, _amount, address(s_usdc));
+    }
+
+    function withdrawUSDC(uint256 _amount) external nonReentrant {
+        uint256 amountInUSD = _convertToUSD(_amount, _getUSDCPriceInUSD(), USDC_DECIMALS);
+
+        if (amountInUSD > i_maxWithdrawal) {
+            revert KipuBank_TooMuchWithdrawal(i_maxWithdrawal, amountInUSD);
+        }
+
+        if (s_balances[msg.sender][address(s_usdc)] < _amount) {
+            revert KipuBank_NotEnoughBalance(s_balances[msg.sender][address(s_usdc)], _amount);
+        }
+
+        s_withdrawalCount += 1;
+        s_balances[msg.sender][address(s_usdc)] -= _amount;
+        s_balanceInUSD -= amountInUSD;
+
+        s_usdc.safeTransferFrom(address(this), msg.sender, _amount);
+
+        emit KipuBank_WithdrawalMade(msg.sender, _amount, address(s_usdc));
     }
 
     /*/////////////////////////
@@ -237,7 +279,7 @@ contract KipuBank is Ownable, ReentrancyGuard {
     }
 
     // Function to convert from any _amount to usd.
-    function _convertToUSD(uint256 _amount, uint256 _priceInUSD, uint256 _decimals) private view returns (uint256 amountInUSD_) {
+    function _convertToUSD(uint256 _amount, uint256 _priceInUSD, uint256 _decimals) private pure returns (uint256 amountInUSD_) {
         amountInUSD_ = (_amount * _priceInUSD) / _decimals; 
     }
 
@@ -250,6 +292,15 @@ contract KipuBank is Ownable, ReentrancyGuard {
         priceInUSD_ = uint256(ethUSDPrice);
     }
 
+    function _getUSDCPriceInUSD() private view returns (uint256 priceInUSD_) {
+        (, int256 USDPrice,, uint256 updatedAt,) = s_feedUSDCToUSD.latestRoundData();
+
+        if (USDPrice == 0) revert KipuBank_OracleCompromised();
+        if (block.timestamp - updatedAt > ORACLE_HEARTBEAT) revert KipuBank_StalePrice();
+
+        priceInUSD_ = uint256(USDPrice);
+    }
+
     /*/////////////////////////
         View & Pure
     /////////////////////////*/
@@ -258,6 +309,9 @@ contract KipuBank is Ownable, ReentrancyGuard {
      * @return uint256 The balance of the caller.
      */
     function getBalance() external view returns (uint256) {
-        return s_balances[msg.sender];
+        uint256 usdBalance = _convertToUSD(s_balances[msg.sender][address(0)], _getETHPriceInUSD(), ETH_DECIMALS);
+        usdBalance =  _convertToUSD(s_balances[msg.sender][address(s_usdc)], _getUSDCPriceInUSD(), USDC_DECIMALS);
+
+        return usdBalance;
     }
 }

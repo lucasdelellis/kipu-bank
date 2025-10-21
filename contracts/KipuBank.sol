@@ -37,7 +37,7 @@ contract KipuBank is Ownable, ReentrancyGuard {
      */
     mapping(address user => mapping(address token => uint256 balance)) private s_balances;
 
-/**
+    /**
      * @dev Counter for the number of deposits made.
      */
     uint256 public s_depositCount;
@@ -47,7 +47,7 @@ contract KipuBank is Ownable, ReentrancyGuard {
      */
     uint256 public s_withdrawalCount;
 
-/**
+    /**
      * @dev Maximum amount that can be withdrawn in a single transaction in USD.
      */
     uint256 immutable public i_maxWithdrawal;
@@ -105,10 +105,22 @@ contract KipuBank is Ownable, ReentrancyGuard {
      */
     event KipuBank_WithdrawalMade(address user, uint256 amount, address token);
 
+    /**
+     * @dev Emitted when a ETH/USD feed is changed.
+     * @param feed The address of ETH/USD feed.
+     */
+    event KipuBank_ChainlinkEthToUsdFeedUpdated(address feed);
+
+    /**
+     * @dev Emitted when a USDC/USD feed is changed.
+     * @param feed The address of USDC/USD feed.
+     */
+    event KipuBank_ChainlinkUsdcToUsdFeedUpdated(address feed);
+
     /*///////////////////////////////////
                 Errors
     ///////////////////////////////////*/
-/**
+    /**
      * @dev Reverted when the contract's balance cap is reached.
      * @param maxContractBalance The maximum balance the contract can hold.
      * @param currentBalance The current balance of the contract.
@@ -150,6 +162,7 @@ contract KipuBank is Ownable, ReentrancyGuard {
      * @dev Reverted when price is stale.
      */
     error KipuBank_StalePrice();
+    
 
     /*/////////////////////////
             constructor
@@ -266,6 +279,24 @@ contract KipuBank is Ownable, ReentrancyGuard {
         s_usdc.safeTransfer(msg.sender, _amount);
 
         emit KipuBank_WithdrawalMade(msg.sender, _amount, address(s_usdc));
+    }
+
+    /**
+     * @dev Change ETH/USD feed address.
+     */
+    function setETHToUSDFeed(address _feed) external onlyOwner {
+        s_feedETHToUSD = AggregatorV3Interface(_feed);
+
+        emit KipuBank_ChainlinkEthToUsdFeedUpdated(_feed);
+    }
+
+    /**
+     * @dev Change USDC/USD feed address.
+     */
+    function setUSDCToUSDFeed(address _feed) external onlyOwner {
+        s_feedUSDCToUSD = AggregatorV3Interface(_feed);
+
+        emit KipuBank_ChainlinkUsdcToUsdFeedUpdated(_feed);
     }
 
     /*/////////////////////////

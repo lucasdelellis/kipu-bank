@@ -22,24 +22,22 @@ import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interf
 /**
  * @title KipuBank
  * @author lucasdelellis
- * @notice This contract implements a simple bank system where users can deposit and withdraw ETH.
+ * @notice This contract implements a simple bank system where users can deposit and withdraw ETH and USDC.
  * @dev The contract has a maximum cap on the total ETH it can hold and a maximum withdrawal limit per transaction.
  */
 contract KipuBank is Ownable, ReentrancyGuard {
-    /*///////////////////////////////////
-            Types
-    ///////////////////////////////////*/
     using SafeERC20 for IERC20;
 
     /*///////////////////////////////////
             State variables
     ///////////////////////////////////*/
     /**
-     * @dev Mapping to store the balance of each user.
+     * @dev Mapping to store the balance of each user for each token.
+     * @custom:added Supports multiple tokens (ETH and USDC).
      */
-    mapping(address user => mapping (address token => uint256 balance)) private s_balances;
+    mapping(address user => mapping(address token => uint256 balance)) private s_balances;
 
-    /**
+/**
      * @dev Counter for the number of deposits made.
      */
     uint256 public s_depositCount;
@@ -49,7 +47,7 @@ contract KipuBank is Ownable, ReentrancyGuard {
      */
     uint256 public s_withdrawalCount;
 
-    /**
+/**
      * @dev Maximum amount that can be withdrawn in a single transaction in USD.
      */
     uint256 immutable public i_maxWithdrawal;
@@ -64,17 +62,29 @@ contract KipuBank is Ownable, ReentrancyGuard {
      */
     uint256 immutable public i_bankCap;
 
-    ///@notice variable constante para almacenar el latido (heartbeat) del Data Feed
+    /**
+     * @dev Maximum time (in seconds) that oracle data is considered fresh.
+     */
     uint16 constant ORACLE_HEARTBEAT = 3600;
 
     uint256 constant ETH_DECIMALS = 1e18;
-    ///@notice variable para almacenar la dirección del Chainlink Feed
+
+    /**
+     * @dev Chainlink price feed for ETH/USD.
+     */
     AggregatorV3Interface public s_feedETHToUSD;
 
+    /**
+     * @dev USDC token contract.
+     */
     IERC20 immutable public s_usdc;
-    uint256 constant USDC_DECIMALS = 1e6; 
-    ///@notice variable para almacenar la dirección del Chainlink Feed
-    AggregatorV3Interface public s_feedUSDCToUSD;  
+
+    uint256 constant USDC_DECIMALS = 1e6;
+
+    /**
+     * @dev Chainlink price feed for USDC/USD.
+     */
+    AggregatorV3Interface public s_feedUSDCToUSD;
 
     /*///////////////////////////////////
                 Events
@@ -82,7 +92,8 @@ contract KipuBank is Ownable, ReentrancyGuard {
     /**
      * @dev Emitted when a deposit is received.
      * @param user The address of the user who made the deposit.
-     * @param amount The amount of ETH deposited.
+     * @param amount The amount of token deposited.
+     * @param token The address of the token of the deposit.
      */
     event KipuBank_DepositReceived(address user, uint256 amount, address token);
 
@@ -90,13 +101,14 @@ contract KipuBank is Ownable, ReentrancyGuard {
      * @dev Emitted when a withdrawal is made.
      * @param user The address of the user who made the withdrawal.
      * @param amount The amount of ETH withdrawn.
+     * @param token The address of the token of the withdrawal.
      */
     event KipuBank_WithdrawalMade(address user, uint256 amount, address token);
 
     /*///////////////////////////////////
                 Errors
     ///////////////////////////////////*/
-    /**
+/**
      * @dev Reverted when the contract's balance cap is reached.
      * @param maxContractBalance The maximum balance the contract can hold.
      * @param currentBalance The current balance of the contract.
@@ -129,21 +141,35 @@ contract KipuBank is Ownable, ReentrancyGuard {
      */
     error KipuBank_FallbackNotAllowed();
 
-    ///@notice error emitido cuando el retorno del oráculo es incorrecto
+    /**
+     * @dev Reverted when Oracle was compromised.
+     */
     error KipuBank_OracleCompromised();
-    
-    ///@notice error emitido cuando la última actualización del oráculo supera el heartbeat
+
+    /**
+     * @dev Reverted when price is stale.
+     */
     error KipuBank_StalePrice();
 
     /*/////////////////////////
             constructor
     /////////////////////////*/
     /**
-     * @dev Constructor to initialize the contract with the maximum bank cap and maximum withdrawal limit.
-     * @param _bankCap The maximum total ETH the contract can hold.
-     * @param _maxWithdrawal The maximum amount that can be withdrawn in a single transaction.
+     * @param _bankCap The maximum total USD the contract can hold.
+     * @param _maxWithdrawal The maximum amount (in USD) that can be withdrawn per transaction.
+     * @param _owner The address of the contract owner.
+     * @param _feedETHToUSD Chainlink ETH/USD feed address.
+     * @param _usdc USDC token address.
+     * @param _feedUSDCToUSD Chainlink USDC/USD feed address.
      */
-    constructor(uint256 _bankCap, uint256 _maxWithdrawal, address _owner, address _feedETHToUSD, address _usdc, address _feedUSDCToUSD) Ownable(_owner){
+    constructor(
+        uint256 _bankCap,
+        uint256 _maxWithdrawal,
+        address _owner,
+        address _feedETHToUSD,
+        address _usdc,
+        address _feedUSDCToUSD
+    ) Ownable(_owner) {
         i_maxWithdrawal = _maxWithdrawal;
         i_bankCap = _bankCap;
         s_feedETHToUSD = AggregatorV3Interface(_feedETHToUSD);
@@ -158,13 +184,13 @@ contract KipuBank is Ownable, ReentrancyGuard {
      * @dev Receive function to deposit ETH.
      */
     receive() external payable {
-        _depositETH(msg.sender, msg.value);    
+        _depositETH(msg.sender, msg.value);
     }
 
     /**
      * @dev Fallback function to prevent accidental ETH transfers.
      */
-    fallback() external payable { 
+    fallback() external payable {
         _depositETH(msg.sender, msg.value);
     }
 
@@ -193,22 +219,23 @@ contract KipuBank is Ownable, ReentrancyGuard {
             revert KipuBank_NotEnoughBalance(s_balances[msg.sender][address(0)], _amount);
         }
 
-
         s_withdrawalCount += 1;
         s_balances[msg.sender][address(0)] -= _amount;
         s_balanceInUSD -= amountInUSD;
 
         _transferEth(payable(msg.sender), _amount);
-
         emit KipuBank_WithdrawalMade(msg.sender, _amount, address(0));
     }
 
+    /**
+     * @dev Deposit USDC into the contract.
+     */
     function depositUSDC(uint256 _amount) external nonReentrant {
         uint256 amountInUSD = _convertToUSD(_amount, _getUSDCPriceInUSD(), USDC_DECIMALS);
         if (_exceedsBankCap(amountInUSD)) {
             revert KipuBank_BankCapReached(i_bankCap, s_balanceInUSD, amountInUSD);
         }
-
+        
         s_depositCount += 1;
         s_balances[msg.sender][address(s_usdc)] += _amount;
         s_balanceInUSD += amountInUSD;
@@ -218,6 +245,9 @@ contract KipuBank is Ownable, ReentrancyGuard {
         emit KipuBank_DepositReceived(msg.sender, _amount, address(s_usdc));
     }
 
+    /**
+     * @dev Withdraw USDC from the contract.
+     */
     function withdrawUSDC(uint256 _amount) external nonReentrant {
         uint256 amountInUSD = _convertToUSD(_amount, _getUSDCPriceInUSD(), USDC_DECIMALS);
 
@@ -233,7 +263,7 @@ contract KipuBank is Ownable, ReentrancyGuard {
         s_balances[msg.sender][address(s_usdc)] -= _amount;
         s_balanceInUSD -= amountInUSD;
 
-        s_usdc.safeTransferFrom(address(this), msg.sender, _amount);
+        s_usdc.safeTransfer(msg.sender, _amount);
 
         emit KipuBank_WithdrawalMade(msg.sender, _amount, address(s_usdc));
     }
@@ -257,7 +287,6 @@ contract KipuBank is Ownable, ReentrancyGuard {
      */
     function _transferEth(address payable _recipient, uint256 _amount) private {
         (bool success, bytes memory error) = _recipient.call{value: _amount}("");
-
         if (!success) revert KipuBank_TransferFailed(error);
     }
 
@@ -278,26 +307,32 @@ contract KipuBank is Ownable, ReentrancyGuard {
         emit KipuBank_DepositReceived(_from, _amount, address(0));
     }
 
-    // Function to convert from any _amount to usd.
-    function _convertToUSD(uint256 _amount, uint256 _priceInUSD, uint256 _decimals) private pure returns (uint256 amountInUSD_) {
+    /**
+     * @dev Convert token amount to USD using Chainlink price and token decimals.
+     */
+    function _convertToUSD(uint256 _amount, uint256 _priceInUSD, uint256 _decimals)
+        private pure returns (uint256 amountInUSD_)
+    {
         amountInUSD_ = (_amount * _priceInUSD) / _decimals; 
     }
 
+    /**
+     * @dev Chainlink-based ETH/USD price feed reader.
+     */
     function _getETHPriceInUSD() private view returns (uint256 priceInUSD_) {
         (, int256 ethUSDPrice,, uint256 updatedAt,) = s_feedETHToUSD.latestRoundData();
-
         if (ethUSDPrice == 0) revert KipuBank_OracleCompromised();
         if (block.timestamp - updatedAt > ORACLE_HEARTBEAT) revert KipuBank_StalePrice();
-
         priceInUSD_ = uint256(ethUSDPrice);
     }
 
+    /**
+     * @dev Chainlink-based USDC/USD price feed reader.
+     */
     function _getUSDCPriceInUSD() private view returns (uint256 priceInUSD_) {
         (, int256 USDPrice,, uint256 updatedAt,) = s_feedUSDCToUSD.latestRoundData();
-
         if (USDPrice == 0) revert KipuBank_OracleCompromised();
         if (block.timestamp - updatedAt > ORACLE_HEARTBEAT) revert KipuBank_StalePrice();
-
         priceInUSD_ = uint256(USDPrice);
     }
 
@@ -306,12 +341,11 @@ contract KipuBank is Ownable, ReentrancyGuard {
     /////////////////////////*/
     /**
      * @dev Function to get the balance of the caller.
-     * @return uint256 The balance of the caller.
+     * @return uint256 The balance of the caller in USD.
      */
     function getBalance() external view returns (uint256) {
         uint256 usdBalance = _convertToUSD(s_balances[msg.sender][address(0)], _getETHPriceInUSD(), ETH_DECIMALS);
-        usdBalance =  _convertToUSD(s_balances[msg.sender][address(s_usdc)], _getUSDCPriceInUSD(), USDC_DECIMALS);
-
+        usdBalance = _convertToUSD(s_balances[msg.sender][address(s_usdc)], _getUSDCPriceInUSD(), USDC_DECIMALS);
         return usdBalance;
     }
 }

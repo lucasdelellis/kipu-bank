@@ -67,24 +67,22 @@ contract KipuBank is Ownable, ReentrancyGuard {
      */
     uint16 constant ORACLE_HEARTBEAT = 3600;
 
-    uint256 constant ETH_DECIMALS = 1e18;
-
     /**
      * @dev Chainlink price feed for ETH/USD.
      */
     AggregatorV3Interface public s_feedETHToUSD;
+    uint256 constant ETH_DECIMALS = 1e18;
 
     /**
      * @dev USDC token contract.
      */
-    IERC20 immutable public s_usdc;
-
-    uint256 constant USDC_DECIMALS = 1e6;
+    IERC20 immutable public s_usdc;    
 
     /**
      * @dev Chainlink price feed for USDC/USD.
      */
     AggregatorV3Interface public s_feedUSDCToUSD;
+    uint256 constant USDC_DECIMALS = 1e6;
 
     /*///////////////////////////////////
                 Events

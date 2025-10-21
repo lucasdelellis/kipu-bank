@@ -87,7 +87,7 @@ contract KipuBank is Ownable, ReentrancyGuard {
      * @param user The address of the user who made the withdrawal.
      * @param amount The amount of ETH withdrawn.
      */
-    event KipuBank_WithdrawalMade(address user, uint256 amount);
+    event KipuBank_WithdrawalMade(address user, uint256 amount, address token);
 
     /*///////////////////////////////////
                 Errors
@@ -131,24 +131,6 @@ contract KipuBank is Ownable, ReentrancyGuard {
     ///@notice error emitido cuando la última actualización del oráculo supera el heartbeat
     error KipuBank_StalePrice();
 
-    /*///////////////////////////////////
-                Modifiers
-    ///////////////////////////////////*/
-    /**
-     * @dev Modifier to check if the user has enough balance to withdraw the specified amount.
-     * @param _amount The amount to withdraw.
-     */
-    modifier hasEnoughBalance(uint256 _amount) {
-        if (_amount > i_maxWithdrawal) {
-            revert KipuBank_TooMuchWithdrawal(i_maxWithdrawal, _amount);
-        }
-
-        if (s_balances[msg.sender] < _amount) {
-            revert KipuBank_NotEnoughBalance(s_balances[msg.sender], _amount);
-        }
-        _;
-    }
-
     /*/////////////////////////
             constructor
     /////////////////////////*/
@@ -185,7 +167,7 @@ contract KipuBank is Ownable, ReentrancyGuard {
     /**
      * @dev Function to deposit ETH into the contract.
      */
-    function deposit() external payable nonReentrant {
+    function depositETH() external payable nonReentrant {
         _depositETH(msg.sender, msg.value);
     }
 
@@ -193,15 +175,25 @@ contract KipuBank is Ownable, ReentrancyGuard {
      * @dev Function to withdraw ETH from the contract.
      * @param _amount The amount of ETH to withdraw.
      */
-    function withdraw(uint256 _amount) external nonReentrant hasEnoughBalance(_amount) {
-        // No se verifica que el contrato tenga suficiente balance porque no es un escenario valido. 
+    function withdrawETH(uint256 _amount) external nonReentrant {
+        uint256 amountInUSD = _convertToUSD(_amount, _getETHPriceInUSD(), ETH_DECIMALS);
+
+        if (amountInUSD > i_maxWithdrawal) {
+            revert KipuBank_TooMuchWithdrawal(i_maxWithdrawal, amountInUSD);
+        }
+
+        if (s_balances[address(0)][msg.sender] < _amount) {
+            revert KipuBank_NotEnoughBalance(s_balances[address(0)][msg.sender], _amount);
+        }
+
 
         s_withdrawalCount += 1;
-        s_balances[msg.sender] -= _amount;
+        s_balances[address(0)][msg.sender] -= _amount;
+        s_balanceInUSD -= amountInUSD;
 
         _transferEth(payable(msg.sender), _amount);
 
-        emit KipuBank_WithdrawalMade(msg.sender, _amount);
+        emit KipuBank_WithdrawalMade(msg.sender, _amount, address(0));
     }
 
     /*/////////////////////////
